@@ -1,0 +1,1499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luminaire Predictor (Merged)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="model_weights.js"></script>
+    <script src="luminaire_data.js"></script>
+    <script src="ies_plot.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+            max-height: 1080px;
+            width: 100vw;
+            max-width: 1920px;
+        }
+        .left-panel {
+            width: 380px;
+            min-width: 380px;
+            height: calc(100vh + 60px);
+            max-height: calc(1080px + 60px);
+            display: flex;
+            flex-direction: column;
+            background: #2a2a2a;
+            overflow: hidden;
+            transform: scale(0.96);
+            transform-origin: top left;
+            margin-top: -5px;
+        }
+        .predictor-section {
+            padding: 12px;
+            border-bottom: 2px solid #444;
+            flex-shrink: 0;
+        }
+        .viz-controls-section {
+            padding: 12px;
+            flex-shrink: 0;
+        }
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .checkbox-item {
+            font-size: 0.7rem;
+        }
+        .checkbox-item label {
+            display: flex;
+            align-items: center;
+            color: #ccc;
+            cursor: pointer;
+        }
+        .checkbox-item input[type="checkbox"] {
+            margin-right: 6px;
+            cursor: pointer;
+        }
+        .predictor-section h2 {
+            margin-bottom: 10px;
+            color: #fff;
+            font-size: 0.9rem;
+        }
+        .viz-controls-section h3 {
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+            color: #ccc;
+        }
+        .control-group {
+            margin-bottom: 8px;
+            transform: scale(0.75);
+            transform-origin: top left;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 3px;
+            color: #ccc;
+            font-size: 0.75rem;
+        }
+        .control-group input[type="range"] {
+            width: 100%;
+        }
+        .control-group input[type="number"],
+        .control-group select {
+            width: 100%;
+            padding: 4px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 3px;
+            font-size: 0.75rem;
+        }
+        .control-group input[type="checkbox"] {
+            margin-right: 8px;
+        }
+        .btn-primary {
+            width: 100%;
+            padding: 6px;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            margin-top: 8px;
+            transform: scale(0.75);
+            transform-origin: top left;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 10px 0;
+            color: #ccc;
+        }
+        .error-message {
+            display: none;
+            color: #ff4444;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255, 68, 68, 0.2);
+            border-radius: 3px;
+        }
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #000;
+            min-width: 0;
+        }
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: #000;
+            min-height: 0;
+        }
+        #room3d {
+            width: 100%;
+            height: 100%;
+        }
+        .ies-plot-container {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 120px;
+            height: 120px;
+            background: rgba(26, 26, 26, 0.9);
+            border: 1px solid #555;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+        #iesPlotCanvas {
+            width: 112px;
+            height: 112px;
+        }
+        .results-panel {
+            padding: 8px 12px;
+            background: #2a2a2a;
+            height: 170px;
+            overflow: hidden;
+            flex-shrink: 0;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 12px;
+        }
+        .prediction-summary {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            overflow: hidden;
+        }
+        .summary-item {
+            font-size: 0.7rem;
+            color: #ccc;
+            line-height: 1.3;
+        }
+        .summary-item strong {
+            color: #fff;
+            font-size: 0.75rem;
+        }
+        .matches-section {
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .matches-section h4 {
+            font-size: 0.7rem;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+        .match-card {
+            background: #333;
+            padding: 4px 6px;
+            border-radius: 3px;
+            margin-bottom: 3px;
+        }
+        .match-card h4 {
+            font-size: 0.65rem;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+        .match-details {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 2px;
+            font-size: 0.6rem;
+            color: #ccc;
+        }
+         .color-box {
+             display: inline-block;
+             width: 20px;
+             height: 20px;
+             border-radius: 3px;
+             border: 1px solid #888;
+             vertical-align: middle;
+             margin-left: 8px;
+         }
+         .fullscreen-notification {
+             position: fixed;
+             top: 50%;
+             left: 50%;
+             transform: translate(-50%, -50%);
+             background: rgba(0, 0, 0, 0.9);
+             color: #fff;
+             padding: 20px 30px;
+             border-radius: 8px;
+             border: 2px solid #4a9eff;
+             font-size: 1.2rem;
+             font-weight: bold;
+             z-index: 10000;
+             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+             animation: fadeIn 0.3s ease-in;
+             pointer-events: none;
+         }
+         @keyframes fadeIn {
+             from {
+                 opacity: 0;
+                 transform: translate(-50%, -50%) scale(0.9);
+             }
+             to {
+                 opacity: 1;
+                 transform: translate(-50%, -50%) scale(1);
+             }
+         }
+         .fullscreen-notification.fadeOut {
+             animation: fadeOut 0.3s ease-out forwards;
+         }
+         @keyframes fadeOut {
+             from {
+                 opacity: 1;
+                 transform: translate(-50%, -50%) scale(1);
+             }
+             to {
+                 opacity: 0;
+                 transform: translate(-50%, -50%) scale(0.9);
+             }
+         }
+     </style>
+</head>
+<body>
+    <div class="container">
+        <div class="left-panel">
+            <!-- Predictor Controls Section -->
+            <div class="predictor-section">
+                <h2>Luminaire Predictor <span style="font-size:0.8rem; color:#888;">v0.2</span></h2>
+                <form id="predictionForm">
+                    <div class="control-group">
+                        <label for="luminaireType">Luminaire Type</label>
+                        <select id="luminaireType" required>
+                            <option value="60X60">60X60</option>
+                            <option value="Downlight">Down Light</option>
+                            <option value="LineerDirekt">Lineer Surface/Recessed</option>
+                            <option value="LineerEndirekt">Lineer Suspended</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>X Dimension: <span id="X_val">500</span></label>
+                        <input type="range" id="X" min="100" max="1000" value="500">
+                        <input type="number" id="X_num" min="100" max="1000" value="500">
+                    </div>
+                    <div class="control-group">
+                        <label>Y Dimension: <span id="Y_val">400</span></label>
+                        <input type="range" id="Y" min="100" max="1000" value="400">
+                        <input type="number" id="Y_num" min="100" max="1000" value="400">
+                    </div>
+                    <div class="control-group">
+                        <label>Z Dimension: <span id="Z_val">300</span></label>
+                        <input type="range" id="Z" min="250" max="750" value="300">
+                        <input type="number" id="Z_num" min="250" max="750" value="300">
+                    </div>
+                    <div class="control-group">
+                        <label>Reflectance: <span id="R_val">65</span>% <span class="color-box" id="R_color" style="background: rgb(166,166,166);"></span></label>
+                        <input type="range" id="R" min="0" max="100" value="65">
+                    </div>
+                    <div class="control-group">
+                        <label for="function">Function</label>
+                        <select id="function">
+                            <option value="Residence">Residence</option>
+                            <option value="Office">Office</option>
+                            <option value="Education">Education</option>
+                            <option value="Hospital">Hospital</option>
+                            <option value="Sports">Sports</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label for="Eo">Expected Illumination (Eo, Lux)</label>
+                        <input type="number" id="Eo" min="100" max="2000" value="200">
+                    </div>
+                    <div class="control-group">
+                        <label for="Uo">Expected Uniformity (Uo)</label>
+                        <input type="number" id="Uo" min="0.3" max="0.9" step="0.01" value="0.4">
+                    </div>
+                    <button type="submit" class="btn-primary">Predict Luminaires</button>
+                    <div class="loading">
+                        <div>Calculating...</div>
+                    </div>
+                    <div class="error-message"></div>
+                </form>
+            </div>
+            
+            <!-- 3D Visualization Controls Section -->
+            <div class="viz-controls-section">
+                <h3>3D Visualization Controls</h3>
+                <div class="control-group">
+                    <label>Zoom: <span id="zoom_val">1.1</span></label>
+                    <input type="range" id="zoom" min="0.5" max="2.0" step="0.1" value="1.1">
+                </div>
+                <div class="control-group">
+                    <label>Exposure: <span id="exposure_val">0.30</span></label>
+                    <input type="range" id="exposure" min="0.0" max="2.0" step="0.01" value="0.30">
+                </div>
+                <div class="control-group">
+                    <label>Light Color (K): <span id="lightColorK_val">4500</span></label>
+                    <input type="range" id="lightColorK" min="2800" max="6500" step="100" value="4500">
+                </div>
+                <div class="checkbox-grid">
+                    <div class="checkbox-item">
+                        <label>
+                            <input type="checkbox" id="showWalls"> Show Walls
+                        </label>
+                    </div>
+                    <div class="checkbox-item">
+                        <label>
+                            <input type="checkbox" id="showFloor" checked> Show Floor
+                        </label>
+                    </div>
+                    <div class="checkbox-item">
+                        <label>
+                            <input type="checkbox" id="showLuminaires" checked> Show Luminaires
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+         <div class="right-panel">
+             <div class="canvas-container">
+                 <div id="room3d"></div>
+                 <div class="ies-plot-container">
+                     <canvas id="iesPlotCanvas" width="112" height="112"></canvas>
+                 </div>
+             </div>
+             <div class="results-panel">
+                 <div id="predictionSummary" class="prediction-summary"></div>
+                 <div id="matches" class="matches-section"></div>
+             </div>
+         </div>
+     </div>
+     
+     <!-- Fullscreen Notification -->
+     <div id="fullscreenNotification" class="fullscreen-notification" style="display: none;">
+         Press F11 for fullscreen
+     </div>
+
+    <script>
+        // Preset values for each function
+        const functionPresets = {
+            'Residence': { Eo: 200, Uo: 0.4 },
+            'Office': { Eo: 500, Uo: 0.6 },
+            'Education': { Eo: 500, Uo: 0.6 },
+            'Hospital': { Eo: 800, Uo: 0.6 },
+            'Sports': { Eo: 1000, Uo: 0.5 }
+        };
+
+        // Convert color temperature (Kelvin) to RGB
+        function kelvinToRGB(kelvin) {
+            const temp = kelvin / 100;
+            let red, green, blue;
+            
+            if (temp <= 66) {
+                red = 255;
+                green = temp;
+                green = 99.4708025861 * Math.log(green) - 161.1195681661;
+                if (temp <= 19) {
+                    blue = 0;
+                } else {
+                    blue = temp - 10;
+                    blue = 138.5177312231 * Math.log(blue) - 305.0447927307;
+                }
+            } else {
+                red = temp - 60;
+                red = 329.698727446 * Math.pow(red, -0.1332047592);
+                green = temp - 60;
+                green = 288.1221695283 * Math.pow(green, -0.0755148492);
+                blue = 255;
+            }
+            
+            return {
+                r: Math.max(0, Math.min(255, Math.round(red))),
+                g: Math.max(0, Math.min(255, Math.round(green))),
+                b: Math.max(0, Math.min(255, Math.round(blue)))
+            };
+        }
+
+        // Neural network prediction function
+        function predict(inputs) {
+            const luminaireType = document.getElementById('luminaireType').value;
+            const weights = modelWeights[luminaireType];
+            
+            if (!weights) {
+                throw new Error(`Model weights not found for ${luminaireType}`);
+            }
+            
+            const isLineer = luminaireType.includes('Lineer');
+            const outputDim = isLineer ? 5 : 4;
+            
+            // Normalize inputs
+            const normalizedInputs = [
+                Math.max(0, Math.min(1, (inputs[0] - 100.0) / 900.0)),
+                Math.max(0, Math.min(1, (inputs[1] - 100.0) / 900.0)),
+                Math.max(0, Math.min(1, inputs[2] / 750.0)),
+                Math.max(0, Math.min(1, inputs[3])),
+                Math.max(0, Math.min(1, inputs[4] / 2000.0)),
+                Math.max(0, Math.min(1, inputs[5]))
+            ];
+            
+            // Simple model: 6 -> 128 -> 128 -> 64 -> output
+            let x = tf.tensor2d([normalizedInputs], [1, 6]);
+            
+            // Layer 1: 6 -> 128
+            x = tf.matMul(x, tf.tensor2d(weights.layer1.weights[0], [128, 6]).transpose());
+            x = tf.add(x, tf.tensor2d(weights.layer1.weights[1], [1, 128]));
+            x = tf.relu(x);
+            
+            // Layer 2: 128 -> 128
+            x = tf.matMul(x, tf.tensor2d(weights.layer2.weights[0], [128, 128]).transpose());
+            x = tf.add(x, tf.tensor2d(weights.layer2.weights[1], [1, 128]));
+            x = tf.relu(x);
+            
+            // Layer 3: 128 -> 64
+            x = tf.matMul(x, tf.tensor2d(weights.layer3.weights[0], [64, 128]).transpose());
+            x = tf.add(x, tf.tensor2d(weights.layer3.weights[1], [1, 64]));
+            x = tf.relu(x);
+            
+            // Output layer: 64 -> output_dim
+            x = tf.matMul(x, tf.tensor2d(weights.outputLayer.weights[0], [outputDim, 64]).transpose());
+            x = tf.add(x, tf.tensor2d(weights.outputLayer.weights[1], [1, outputDim]));
+            x = tf.sigmoid(x);
+            
+            const predictions = x.dataSync();
+            x.dispose();
+            
+            // Denormalize outputs with spacing heuristics
+            const baseX = Math.round(predictions[0] * 10);
+            const baseY = Math.round(predictions[1] * 10);
+            
+            const TARGET_SPACING_X = 250.0;
+            const TARGET_SPACING_Y = 200.0;
+            
+            function adjustCount(base, heuristic, size, spacing) {
+                if (size <= spacing && base <= heuristic) {
+                    return heuristic;
+                }
+                return Math.max(base, heuristic);
+            }
+            
+            const heuristicX = Math.max(1, Math.ceil(inputs[0] / TARGET_SPACING_X));
+            const heuristicY = Math.max(1, Math.ceil(inputs[1] / TARGET_SPACING_Y));
+            
+            const finalX = adjustCount(baseX, heuristicX, inputs[0], TARGET_SPACING_X);
+            const finalY = adjustCount(baseY, heuristicY, inputs[1], TARGET_SPACING_Y);
+            
+            const result = {
+                xCount: finalX,
+                yCount: finalY,
+                Degree: predictions[2] * 180.0,
+                Lumen: Math.round(predictions[3] * 6000.0)
+            };
+            
+            if (isLineer && predictions.length > 4) {
+                result.Rotation = Math.round(predictions[4]);
+            }
+            
+            return result;
+        }
+
+        // Get IES plot data for a luminaire
+        function getIESPlotData(luminaireType, no) {
+            if (!iesPlotData || !iesPlotData[luminaireType]) return null;
+            
+            const key = String(no);
+            const numNo = parseInt(no, 10);
+            
+            // Special handling for Downlight: keys 1-7 are numeric, 10+ are S-prefixed
+            if (luminaireType === 'Downlight') {
+                // Check if numNo is valid
+                if (isNaN(numNo)) {
+                    return null;
+                }
+                
+                let data = null;
+                
+                // For NO 1-7: try exact numeric match
+                if (numNo >= 1 && numNo <= 7) {
+                    data = iesPlotData[luminaireType][key];
+                }
+                // For NO 8-9: These don't have IES files, use IES file 7 as fallback
+                else if (numNo === 8 || numNo === 9) {
+                    data = iesPlotData[luminaireType]['7'];
+                }
+                // For NO >= 10: try S-prefixed first (S10, S11, etc.)
+                else if (numNo >= 10) {
+                    const sKey = 'S' + key;
+                    data = iesPlotData[luminaireType][sKey] || iesPlotData[luminaireType][key];
+                }
+                
+                // If data not found, use S42 as fallback (it's a working one)
+                if (!data && iesPlotData[luminaireType]['S42']) {
+                    data = iesPlotData[luminaireType]['S42'];
+                }
+                
+                return data;
+            } else {
+                // For other types: try exact match first
+                let data = iesPlotData[luminaireType][key];
+                
+                // Try with 'S' prefix (for files that might have S prefix)
+                if (!data) {
+                    data = iesPlotData[luminaireType]['S' + key];
+                }
+                
+                return data;
+            }
+        }
+
+        // Draw IES polar plot on canvas
+        function drawIESPlot(plotData, canvasId = 'iesPlotCanvas') {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas || !plotData) {
+                // Clear canvas if no data
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = '#1a1a1a';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+                return;
+            }
+            
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(width, height) / 2 - 8;
+            
+            // Clear canvas and fill background (not rotated)
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, width, height);
+            
+            // Get angles and candela from preprocessed data
+            const angles = plotData.angles || [];
+            const candelaValues = plotData.candela || [];
+            
+            if (angles.length === 0 || candelaValues.length === 0) return;
+            
+            // Match angles with candela values
+            const validData = [];
+            const maxLen = Math.min(angles.length, candelaValues.length);
+            
+            for (let i = 0; i < maxLen; i++) {
+                const angle = angles[i];
+                const candela = candelaValues[i];
+                
+                if (!isNaN(angle) && !isNaN(candela) && 
+                    isFinite(angle) && isFinite(candela) &&
+                    angle >= 0 && angle <= 180 && candela >= 0) {
+                    validData.push({ angle, candela });
+                }
+            }
+            
+            if (validData.length === 0) return;
+            
+            // Normalize candela values (0 to 1)
+            const maxCandela = Math.max(...validData.map(d => d.candela));
+            if (maxCandela <= 0) return;
+            
+            // Draw grid circles (concentric)
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 0.5;
+            for (let i = 1; i <= 4; i++) {
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, (radius * i) / 4, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            
+            // Draw grid lines (radial, every 45 degrees)
+            ctx.strokeStyle = '#444';
+            for (let angle = 0; angle < 360; angle += 45) {
+                const rad = (angle * Math.PI) / 180;
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(
+                    centerX + Math.cos(rad) * radius,
+                    centerY + Math.sin(rad) * radius
+                );
+                ctx.stroke();
+            }
+            
+            // Draw IES polar plot
+            // IES format: 0° = straight down (nadir), 90° = horizontal, 180° = straight up (zenith)
+            // Standard IES polar plot: 0° (nadir/down) at bottom, angles increase clockwise
+            ctx.strokeStyle = '#4a9eff';
+            ctx.fillStyle = '#4a9eff';
+            ctx.lineWidth = 1.5;
+            
+            // Sort by angle for proper drawing
+            validData.sort((a, b) => a.angle - b.angle);
+            
+            ctx.beginPath();
+            let firstPoint = true;
+            
+            // Draw for each angle (plot both sides for symmetry)
+            // IES angles: 0° = nadir (down), 90° = horizontal, 180° = zenith (up)
+            // For polar plot: map IES 0° (nadir) to bottom of plot
+            // Standard IES plots show symmetric distribution around vertical axis
+            
+            // Draw first half (right side, angles 0-180°)
+            for (let i = 0; i < validData.length; i++) {
+                const { angle, candela } = validData[i];
+                
+                // Normalize candela value
+                const normalized = candela / maxCandela;
+                
+                // Convert IES angle to polar plot angle
+                // IES 0° (nadir/down) should be at bottom
+                // In canvas: 0° = right, 90° = down, -90° = up, 180° = left
+                // To point downward: IES 0° → canvas 90° (down)
+                // So we add 90°: IES 0° + 90° = 90° (canvas down) ✓
+                const plotAngleRad = ((angle + 90) * Math.PI) / 180;
+                
+                // Calculate distance from center (normalized candela * radius)
+                const distance = normalized * radius;
+                
+                // Calculate point
+                const x = centerX + Math.cos(plotAngleRad) * distance;
+                const y = centerY + Math.sin(plotAngleRad) * distance;
+                
+                if (firstPoint) {
+                    ctx.moveTo(x, y);
+                    firstPoint = false;
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            
+            // Draw mirrored side for symmetry (left side, reflected across vertical axis)
+            // Mirror by negating the x coordinate (reflect across vertical center line)
+            for (let i = validData.length - 1; i >= 0; i--) {
+                const { angle, candela } = validData[i];
+                const normalized = candela / maxCandela;
+                // Use same angle calculation
+                const plotAngleRad = ((angle + 90) * Math.PI) / 180;
+                const distance = normalized * radius;
+                // Mirror by negating x coordinate (flip across vertical axis)
+                const x = centerX - Math.cos(plotAngleRad) * distance;
+                const y = centerY + Math.sin(plotAngleRad) * distance;
+                ctx.lineTo(x, y);
+            }
+            
+            ctx.closePath();
+            ctx.stroke();
+            
+            // Fill with semi-transparent color
+            ctx.globalAlpha = 0.25;
+            ctx.fill();
+            ctx.globalAlpha = 1.0;
+        }
+
+        // Find best matches
+        function findBestMatches(predictedDegree, predictedLumen, luminaireType) {
+            const luminaires = luminaireData[luminaireType] || [];
+            if (luminaires.length === 0) return [];
+            
+            const degs = luminaires.map(l => l.DEGREE);
+            const lms = luminaires.map(l => l.LM);
+            const minDeg = Math.min(...degs), maxDeg = Math.max(...degs);
+            const minLm = Math.min(...lms), maxLm = Math.max(...lms);
+            
+            function norm(val, min, max) {
+                if (max === min) return 0.5;
+                return (val - min) / (max - min);
+            }
+            
+            const predDegNorm = norm(predictedDegree, minDeg, maxDeg);
+            const predLmNorm = norm(predictedLumen, minLm, maxLm);
+            
+            return luminaires.map(lum => {
+                const degNorm = norm(lum.DEGREE, minDeg, maxDeg);
+                const lmNorm = norm(lum.LM, minLm, maxLm);
+                const distance = Math.sqrt(
+                    Math.pow(degNorm - predDegNorm, 2) +
+                    Math.pow(lmNorm - predLmNorm, 2)
+                );
+                return {
+                    ...lum,
+                    distance
+                };
+            }).sort((a, b) => a.distance - b.distance);
+        }
+
+        // 3D Scene Variables
+        let scene, camera, renderer;
+        let roomGroup, floor, walls = {};
+        let luminaires = [];
+        let lights = [];
+        let ambientLight, hemiLight;
+        let lastPredictions = null;
+        let lastMatch = null;
+
+        // Initialize 3D Scene
+        function initScene() {
+            const width = document.getElementById('room3d').clientWidth;
+            const height = document.getElementById('room3d').clientHeight;
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+
+            camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 1000);
+            camera.up.set(0, 0, 1);
+            updateCameraPosition();
+
+            renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                alpha: false,
+                powerPreference: "high-performance"
+            });
+            
+            renderer.setClearColor(0x000000, 1);
+            renderer.setSize(width, height);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            document.getElementById('room3d').appendChild(renderer.domElement);
+
+            setupLighting();
+            createRoom();
+            animate();
+        }
+
+        // Indirect illumination lights for wall brightness
+        let indirectLights = [];
+        
+        // Default intensity set to 1
+        const DEFAULT_INTENSITY = 1.0;
+        
+        // Exposure value (can be adjusted via slider)
+        let exposureValue = 0.30;
+
+        function setupLighting() {
+            if (ambientLight) scene.remove(ambientLight);
+            if (hemiLight) scene.remove(hemiLight);
+            indirectLights.forEach(light => scene.remove(light));
+            indirectLights = [];
+
+            // Get light color from slider (2800-6500K)
+            const lightColorK = parseFloat(document.getElementById('lightColorK')?.value || 4500);
+            const colorRGB = kelvinToRGB(lightColorK);
+            const coolWhite = new THREE.Color(colorRGB.r / 255, colorRGB.g / 255, colorRGB.b / 255);
+            
+            const intensity = DEFAULT_INTENSITY * exposureValue;
+            
+            ambientLight = new THREE.AmbientLight(coolWhite, intensity);
+            scene.add(ambientLight);
+
+            hemiLight = new THREE.HemisphereLight(coolWhite, 0x333333, intensity);
+            hemiLight.position.set(0, 0, 1000);
+            scene.add(hemiLight);
+
+            // Fake indirect illumination - add fill lights to brighten walls
+            // Place lights at room corners pointing inward
+            const X = parseFloat(document.getElementById('X')?.value || 500);
+            const Y = parseFloat(document.getElementById('Y')?.value || 400);
+            const Z = parseFloat(document.getElementById('Z')?.value || 300);
+            
+            const fillIntensity = intensity * 2.4;  // 240% of main intensity for indirect (x2 from previous 1.2)
+            
+            // Four corner fill lights pointing toward room center
+            const corners = [
+                { pos: [-X/2000, -Y/2000, Z/2000], target: [0, 0, 0] },
+                { pos: [X/2000, -Y/2000, Z/2000], target: [0, 0, 0] },
+                { pos: [-X/2000, Y/2000, Z/2000], target: [0, 0, 0] },
+                { pos: [X/2000, Y/2000, Z/2000], target: [0, 0, 0] }
+            ];
+            
+            corners.forEach(corner => {
+                const fillLight = new THREE.PointLight(coolWhite, fillIntensity, 5000);
+                fillLight.position.set(corner.pos[0], corner.pos[1], corner.pos[2]);
+                fillLight.castShadow = false;  // No shadows from fill lights
+                scene.add(fillLight);
+                indirectLights.push(fillLight);
+            });
+        }
+
+        function updateLightingIntensity() {
+            // Use default intensity of 1 multiplied by exposure
+            const intensity = DEFAULT_INTENSITY * exposureValue;
+            
+            // Get light color from slider
+            const lightColorK = parseFloat(document.getElementById('lightColorK')?.value || 4500);
+            const colorRGB = kelvinToRGB(lightColorK);
+            const lightColor = new THREE.Color(colorRGB.r / 255, colorRGB.g / 255, colorRGB.b / 255);
+            
+            if (ambientLight) {
+                ambientLight.intensity = intensity;
+                ambientLight.color = lightColor;
+            }
+            if (hemiLight) {
+                hemiLight.intensity = intensity;
+                hemiLight.color = lightColor;
+            }
+            
+            // Update indirect fill lights (x2 from previous)
+            const fillIntensity = intensity * 2.4;
+            indirectLights.forEach(light => {
+                if (light instanceof THREE.PointLight) {
+                    light.intensity = fillIntensity;
+                    light.color = lightColor;
+                }
+            });
+            
+            const Z = parseFloat(document.getElementById('Z').value);
+            const floorZ = -Z / 2000;
+            const baseDistance = 0.4;
+            
+            lights.forEach((light, idx) => {
+                if (light instanceof THREE.SpotLight && luminaires[idx]) {
+                    const lumZ = luminaires[idx].position.z;
+                    const distanceToFloor = lumZ - floorZ;
+                    const distanceFactor = Math.pow(baseDistance / distanceToFloor, 2);
+                    
+                    // Use default intensity of 1 with distance factor and exposure multiplier
+                    const adjustedIntensity = Math.max(0.01, Math.min(3.0, DEFAULT_INTENSITY * distanceFactor * exposureValue));
+                    light.intensity = adjustedIntensity;
+                    light.color = lightColor;
+                }
+            });
+            
+            // Update luminaire material colors
+            luminaires.forEach(lum => {
+                if (lum.material) {
+                    lum.material.color = lightColor;
+                    lum.material.emissive = lightColor;
+                }
+            });
+        }
+
+        function createRoom() {
+            if (roomGroup) scene.remove(roomGroup);
+            if (floor) {
+                scene.remove(floor);
+                floor = null;
+            }
+
+            roomGroup = new THREE.Group();
+
+            // Get reflectance value from UI (0-100, convert to 0-1)
+            const reflectance = parseFloat(document.getElementById('R')?.value || 65) / 100;
+            // Wall color = reflectance value (0-1 maps to 0-255)
+            const wallGray = Math.round(reflectance * 255);
+            const wallColor = (wallGray << 16) | (wallGray << 8) | wallGray;  // RGB same value
+            
+            const opaqueWallMat = new THREE.MeshStandardMaterial({
+                color: wallColor,
+                metalness: 0.1,
+                roughness: 0.8,
+                side: THREE.DoubleSide
+            });
+
+            const transparentWallMat = new THREE.MeshStandardMaterial({
+                color: wallColor,
+                metalness: 0.1,
+                roughness: 0.8,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.3
+            });
+
+            // Back wall (opaque) - at positive Y (north, away from camera)
+            // Wall is vertical in XZ plane, facing south (-Y direction, into room)
+            walls.back = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), opaqueWallMat);
+            walls.back.position.set(0, 0.5, 0);
+            walls.back.rotation.x = Math.PI / 2;  // Rotate around X to make vertical (in XZ plane)
+            walls.back.rotation.z = Math.PI;  // Flip to face into room (south)
+            walls.back.receiveShadow = true;
+            walls.back.visible = true;
+            roomGroup.add(walls.back);
+
+            // Front wall (transparent) - at negative Y (south, facing camera)
+            // Wall is vertical in XZ plane, facing north (+Y direction, into room)
+            walls.front = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), transparentWallMat);
+            walls.front.position.set(0, -0.5, 0);
+            walls.front.rotation.x = Math.PI / 2;  // Rotate around X to make vertical
+            walls.front.receiveShadow = true;
+            walls.front.visible = true;
+            roomGroup.add(walls.front);
+
+            // Left wall (opaque) - at negative X (west, away from camera)
+            // Wall is vertical in YZ plane, facing east (+X direction, into room)
+            walls.left = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), opaqueWallMat);
+            walls.left.position.set(-0.5, 0, 0);
+            walls.left.rotation.y = -Math.PI / 2;  // Rotate around Y to make vertical (in YZ plane)
+            walls.left.rotation.x = Math.PI / 2;  // Rotate around X to make vertical
+            walls.left.rotation.z = Math.PI;  // Flip to face into room (east)
+            walls.left.receiveShadow = true;
+            walls.left.visible = true;
+            roomGroup.add(walls.left);
+
+            // Right wall (transparent) - at positive X (east, facing camera)
+            // Wall is vertical in YZ plane, facing west (-X direction, into room)
+            walls.right = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), transparentWallMat);
+            walls.right.position.set(0.5, 0, 0);
+            walls.right.rotation.y = Math.PI / 2;  // Rotate around Y to make vertical
+            walls.right.rotation.x = Math.PI / 2;  // Rotate around X to make vertical
+            walls.right.receiveShadow = true;
+            walls.right.visible = true;
+            roomGroup.add(walls.right);
+
+            const edgesGeo = new THREE.BoxGeometry(1, 1, 1);
+            const edges = new THREE.EdgesGeometry(edgesGeo);
+            const boxEdges = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x333333 }));
+            roomGroup.add(boxEdges);
+
+            scene.add(roomGroup);
+            createFloor();
+            updateRoomDimensions();
+        }
+
+        function createFloor() {
+            if (floor) scene.remove(floor);
+
+            // Get reflectance value from UI and apply to floor (floor = reflectance * 0.2)
+            const reflectance = parseFloat(document.getElementById('R')?.value || 65) / 100;
+            const floorReflectance = reflectance * 0.2;
+            const floorGray = Math.round(floorReflectance * 255);
+            const floorColor = (floorGray << 16) | (floorGray << 8) | floorGray;
+
+            const Z = parseFloat(document.getElementById('Z')?.value || 300);
+            const floorGeo = new THREE.PlaneGeometry(1, 1);
+            const floorMat = new THREE.MeshStandardMaterial({
+                color: floorColor,
+                roughness: 0.9,
+                metalness: 0.0
+            });
+            floor = new THREE.Mesh(floorGeo, floorMat);
+            // Position floor at bottom of room (normalized coordinates)
+            floor.position.set(0, 0, -Z / 2000);
+            floor.receiveShadow = true;
+            floor.visible = true;
+            scene.add(floor);
+        }
+
+        function clearLuminaires() {
+            luminaires.forEach(lum => scene.remove(lum));
+            luminaires = [];
+            lights.forEach(light => {
+                if (light.target) scene.remove(light.target);
+                scene.remove(light);
+            });
+            lights = [];
+        }
+
+        function createLuminaires() {
+            clearLuminaires();
+            
+            if (!lastPredictions || !lastPredictions.xCount || !lastPredictions.yCount) return;
+
+            const X = parseFloat(document.getElementById('X').value);
+            const Y = parseFloat(document.getElementById('Y').value);
+            const Z = parseFloat(document.getElementById('Z').value);
+            const xCount = lastPredictions.xCount;
+            const yCount = lastPredictions.yCount;
+
+            const floorZ = -Z / 2000;
+            const baseDistance = 0.4;
+
+            // Get light color from slider (2800-6500K)
+            const lightColorK = parseFloat(document.getElementById('lightColorK')?.value || 4500);
+            const colorRGB = kelvinToRGB(lightColorK);
+            const luminaireColor = new THREE.Color(colorRGB.r / 255, colorRGB.g / 255, colorRGB.b / 255);
+
+            // Get luminaire type to determine shape
+            const luminaireType = document.getElementById('luminaireType').value;
+            
+            // Calculate intensity based on predicted lumen (using default intensity of 1)
+            const predictedLumen = lastPredictions.Lumen || 1000;
+            // Use a simple calculation: intensity scales with lumen but capped
+            const calculatedIntensity = Math.min(1.0, predictedLumen / 4000); // Normalize to 4000 lumen = 1.0 intensity
+            
+            // Get predicted degree for spotlight angle
+            const predictedDegree = lastPredictions.Degree || 60; // Default to 60° if not available
+            const beamAngleRad = (predictedDegree * Math.PI) / 180;
+            
+            // Info display removed (lighting settings panel removed)
+
+            // Spacing rule: a, 2a, a (matching original logic from standalone.html)
+            // In original: xCount for Y axis (width), yCount for X axis (depth)
+            // But in our coordinate system: X = width, Y = depth
+            // So: xCount luminaires along X (width), yCount luminaires along Y (depth)
+            const aX = Y / (2 * yCount);  // Spacing for Y dimension (depth)
+            const xPositions = Array.from({length: yCount}, (_, i) => -Y/2 + aX + i * 2 * aX);
+            
+            const aY = X / (2 * xCount);  // Spacing for X dimension (width)
+            const yPositions = Array.from({length: xCount}, (_, j) => -X/2 + aY + j * 2 * aY);
+
+            for (let i = 0; i < xCount; i++) {
+                for (let j = 0; j < yCount; j++) {
+                    // Fixed: x uses yPositions (for X dimension/width), y uses xPositions (for Y dimension/depth)
+                    const x = yPositions[i] / 1000;  // X coordinate (width) - use xCount index
+                    const y = xPositions[j] / 1000;  // Y coordinate (depth) - use yCount index
+                    // For Lineer Suspended, always use Z position of 235mm from floor
+                    const z = (luminaireType === 'LineerEndirekt') ? floorZ + (235 / 1000) : (Z / 2) / 1000 - 0.01;
+
+                    let geometry;
+                    let rotation = 0;
+                    // Create geometry based on luminaire type
+                    if (luminaireType === '60X60') {
+                        // 30x30x1 cube (scaled to 0.03 x 0.03 x 0.001 in normalized coordinates)
+                        geometry = new THREE.BoxGeometry(0.03, 0.03, 0.001);
+                    } else if (luminaireType === 'Downlight') {
+                        // Sphere (current)
+                        geometry = new THREE.SphereGeometry(0.01, 32, 32);
+                    } else if (luminaireType === 'LineerDirekt' || luminaireType === 'LineerEndirekt') {
+                        // Use X and Y dimensions to determine orientation
+                        // If X >= Y: use 100 x 5 x 1 (oriented along X-axis)
+                        // If Y > X: use 5 x 100 x 1 (oriented along Y-axis)
+                        if (X >= Y) {
+                            // 100 x 5 x 1 (100mm long along X-axis, 5mm wide)
+                            geometry = new THREE.BoxGeometry(0.1, 0.005, 0.001);
+                            rotation = 0;
+                        } else {
+                            // 5 x 100 x 1 (5mm wide, 100mm long along Y-axis)
+                            geometry = new THREE.BoxGeometry(0.005, 0.1, 0.001);
+                            rotation = 0;  // No rotation needed, dimensions are swapped
+                        }
+                    } else {
+                        // Default to sphere
+                        geometry = new THREE.SphereGeometry(0.01, 32, 32);
+                    }
+
+                    const material = new THREE.MeshStandardMaterial({
+                        color: luminaireColor,
+                        metalness: 0.2,
+                        roughness: 0.3,
+                        emissive: luminaireColor,
+                        emissiveIntensity: 0.8
+                    });
+                    const luminaire = new THREE.Mesh(geometry, material);
+                    luminaire.position.set(x, y, z);
+                    luminaire.rotation.z = rotation;  // Apply rotation for Lineer types
+                    // Disable shadow casting for luminaires to reduce texture units
+                    luminaire.castShadow = false;
+                    scene.add(luminaire);
+                    luminaires.push(luminaire);
+
+                    const distanceToFloor = z - floorZ;
+                    const distanceFactor = Math.pow(baseDistance / distanceToFloor, 2);
+                    
+                    // Use default intensity of 1 with distance factor and exposure multiplier
+                    const adjustedIntensity = Math.max(0.01, Math.min(3.0, DEFAULT_INTENSITY * distanceFactor * exposureValue));
+                    
+                    // Create default spotlight using predicted degree
+                    const light = new THREE.SpotLight(luminaireColor, adjustedIntensity, 2000, beamAngleRad, 0.3, 2);
+                    light.position.set(x, y, z);
+                    const targetDistance = (Z / 1000) * 0.8; // 80% of room height
+                    light.target.position.set(x, y, z - targetDistance);
+                    
+                    // Only enable shadows for first 8 lights to avoid exceeding WebGL texture unit limit (16)
+                    const lightIndex = i * yCount + j;
+                    if (lightIndex < 8) {
+                        light.castShadow = true;
+                        light.shadow.mapSize.width = 1024;  // Reduced from 2048 to save resources
+                        light.shadow.mapSize.height = 1024;
+                    } else {
+                        light.castShadow = false;
+                    }
+                    
+                    scene.add(light);
+                    scene.add(light.target);
+                    lights.push(light);
+                }
+            }
+        }
+
+        function updateRoomDimensions() {
+            const X = parseFloat(document.getElementById('X').value);
+            const Y = parseFloat(document.getElementById('Y').value);
+            const Z = parseFloat(document.getElementById('Z').value);
+
+            // Ensure room exists, recreate if needed
+            if (!roomGroup || !walls.back || !walls.front || !walls.left || !walls.right) {
+                createRoom();
+                return; // createRoom calls updateRoomDimensions, so return here
+            }
+
+            if (roomGroup) {
+                roomGroup.scale.set(X / 1000, Y / 1000, Z / 1000);
+                
+                // Update wall colors based on reflectance
+                const reflectance = parseFloat(document.getElementById('R')?.value || 65) / 100;
+                const wallGray = Math.round(reflectance * 255);
+                const wallColor = (wallGray << 16) | (wallGray << 8) | wallGray;
+                
+                Object.values(walls).forEach(wall => {
+                    if (wall && wall.material) {
+                        wall.material.color.setHex(wallColor);
+                    }
+                });
+            }
+
+            if (floor) {
+                floor.scale.set(X / 1000, Y / 1000, 1);
+                floor.position.set(0, 0, -Z / 2000);
+                
+                // Update floor color based on reflectance * 0.2
+                const reflectance = parseFloat(document.getElementById('R')?.value || 65) / 100;
+                const floorReflectance = reflectance * 0.2;
+                const floorGray = Math.round(floorReflectance * 255);
+                const floorColor = (floorGray << 16) | (floorGray << 8) | floorGray;
+                
+                if (floor.material) {
+                    floor.material.color.setHex(floorColor);
+                }
+            }
+
+            // Update indirect fill lights positions
+            const intensity = DEFAULT_INTENSITY * exposureValue;
+            const fillIntensity = intensity * 2.4;
+            
+            const corners = [
+                { idx: 0, pos: [-X/2000, -Y/2000, Z/2000] },
+                { idx: 1, pos: [X/2000, -Y/2000, Z/2000] },
+                { idx: 2, pos: [-X/2000, Y/2000, Z/2000] },
+                { idx: 3, pos: [X/2000, Y/2000, Z/2000] }
+            ];
+            
+            corners.forEach(corner => {
+                if (indirectLights[corner.idx]) {
+                    indirectLights[corner.idx].position.set(corner.pos[0], corner.pos[1], corner.pos[2]);
+                    indirectLights[corner.idx].intensity = fillIntensity;
+                }
+            });
+
+            createLuminaires();
+            updateCameraPosition();
+        }
+
+        function updateCameraPosition() {
+            if (!camera) return;
+
+            const X = parseFloat(document.getElementById('X').value);
+            const Y = parseFloat(document.getElementById('Y').value);
+            const Z = parseFloat(document.getElementById('Z').value);
+
+            const maxDim = Math.max(X, Y, Z);
+            const zoom = parseFloat(document.getElementById('zoom').value);
+            const distance = maxDim / 600 * zoom;
+
+            camera.position.set(-distance * 0.7, distance * 0.7, distance * 0.7);
+            camera.lookAt(0, 0, 0);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        function updatePredictionDisplay(predictions, matches) {
+            const summary = document.getElementById('predictionSummary');
+            const matchesDiv = document.getElementById('matches');
+            const luminaireType = document.getElementById('luminaireType').value;
+            const isLineer = luminaireType.includes('Lineer');
+            
+            lastPredictions = predictions;
+            lastMatch = matches && matches.length > 0 ? matches[0] : null;
+            
+            // Left part: Predictions (4 lines)
+            const rotationLine = isLineer && predictions.Rotation !== undefined 
+                ? `<div class="summary-item"><strong>Rotation:</strong> ${predictions.Rotation}</div>`
+                : '';
+            summary.innerHTML = `
+                <div class="prediction-summary">
+                    <div class="summary-item"><strong>xCount:</strong> ${predictions.xCount} | <strong>yCount:</strong> ${predictions.yCount}</div>
+                    <div class="summary-item"><strong>Degree:</strong> ${predictions.Degree.toFixed(1)}°</div>
+                    <div class="summary-item"><strong>Lumen:</strong> ${predictions.Lumen}</div>
+                    ${rotationLine}
+                </div>
+            `;
+            
+            // Right part: Recommended Luminaires (only 2)
+            // Get IES plot data for first match and draw plot
+            let iesPlotDataForPlot = null;
+            if (matches && matches.length > 0) {
+                const firstMatch = matches[0];
+                if (firstMatch.NO !== undefined && firstMatch.NO !== null) {
+                    iesPlotDataForPlot = getIESPlotData(luminaireType, firstMatch.NO);
+                }
+                
+                matchesDiv.innerHTML = 
+                    '<h4>Recommended Luminaires:</h4>' +
+                    matches.slice(0, 2).map(match => `
+                        <div class="match-card">
+                            <h4>${match.FIRM} ${match.MODEL}</h4>
+                            <div class="match-details">
+                                <div><strong>Degree:</strong> ${match.DEGREE}°</div>
+                                <div><strong>Lumen:</strong> ${match.LM}</div>
+                                <div><strong>Watt:</strong> ${match.W}</div>
+                                <div><strong>Score:</strong> ${match.distance.toFixed(4)}</div>
+                            </div>
+                        </div>
+                    `).join('');
+                
+                // Draw IES plot after a short delay to ensure DOM is updated
+                setTimeout(() => {
+                    drawIESPlot(iesPlotDataForPlot);
+                }, 10);
+            } else {
+                matchesDiv.innerHTML = '<p style="color: #888; font-size: 0.75rem;">No matching luminaires found</p>';
+                // Clear plot when no matches
+                setTimeout(() => {
+                    drawIESPlot(null);
+                }, 10);
+            }
+            
+            // Update lighting info and recreate luminaires with new IES/intensity
+            createLuminaires();
+            updateRoomDimensions();
+            // Ensure camera is updated for larger rooms
+            updateCameraPosition();
+        }
+
+         // Fullscreen Notification
+         let fullscreenNotificationTimeout = null;
+         
+         function showFullscreenNotification() {
+             const notification = document.getElementById('fullscreenNotification');
+             if (!notification) return;
+             
+             notification.style.display = 'block';
+             notification.classList.remove('fadeOut');
+             
+             // Hide after 5 seconds
+             fullscreenNotificationTimeout = setTimeout(() => {
+                 hideFullscreenNotification();
+             }, 5000);
+         }
+         
+         function hideFullscreenNotification() {
+             const notification = document.getElementById('fullscreenNotification');
+             if (!notification) return;
+             
+             if (fullscreenNotificationTimeout) {
+                 clearTimeout(fullscreenNotificationTimeout);
+                 fullscreenNotificationTimeout = null;
+             }
+             
+             notification.classList.add('fadeOut');
+             setTimeout(() => {
+                 notification.style.display = 'none';
+                 notification.classList.remove('fadeOut');
+             }, 300);
+         }
+         
+         // Event Listeners
+         document.addEventListener('DOMContentLoaded', async () => {
+             // Show fullscreen notification on page load
+             showFullscreenNotification();
+             
+             // Hide notification when F11 is pressed
+             document.addEventListener('keydown', (e) => {
+                 if (e.key === 'F11') {
+                     e.preventDefault(); // Prevent default F11 behavior
+                     hideFullscreenNotification();
+                     // Toggle fullscreen manually
+                     if (!document.fullscreenElement) {
+                         document.documentElement.requestFullscreen().catch(err => {
+                             console.log('Error attempting to enable fullscreen:', err);
+                         });
+                     } else {
+                         document.exitFullscreen();
+                     }
+                 }
+             });
+             
+            // Set TensorFlow.js to use CPU backend to avoid WebGL conflicts with Three.js
+            try {
+                await tf.setBackend('cpu');
+                await tf.ready();
+                console.log('TensorFlow.js using CPU backend');
+            } catch (error) {
+                console.warn('Could not set CPU backend, using default:', error);
+            }
+            
+            initScene();
+            
+            // Set initial wall visibility based on checkbox (unchecked by default)
+            const showWallsInitial = document.getElementById('showWalls');
+            if (walls.back) walls.back.visible = showWallsInitial.checked;
+            if (walls.left) walls.left.visible = showWallsInitial.checked;
+
+            // Dimension controls
+            ['X', 'Y', 'Z'].forEach(dim => {
+                const slider = document.getElementById(dim);
+                const num = document.getElementById(dim + '_num');
+                const val = document.getElementById(dim + '_val');
+
+                slider.addEventListener('input', () => {
+                    num.value = slider.value;
+                    val.textContent = slider.value;
+                    updateRoomDimensions();
+                });
+
+                num.addEventListener('input', () => {
+                    slider.value = num.value;
+                    val.textContent = num.value;
+                    updateRoomDimensions();
+                });
+            });
+
+            // Reflectance slider - update colors when changed
+            const Rslider = document.getElementById('R');
+            const Rval = document.getElementById('R_val');
+            const Rcolor = document.getElementById('R_color');
+            Rslider.addEventListener('input', () => {
+                Rval.textContent = Rslider.value + '%';
+                const gray = Math.round(255 * (Rslider.value/100));
+                Rcolor.style.background = `rgb(${gray},${gray},${gray})`;
+                // Update wall and floor colors
+                updateRoomDimensions();
+            });
+
+            // Luminaire type dropdown - update shapes when changed
+            const luminaireTypeSel = document.getElementById('luminaireType');
+            luminaireTypeSel.addEventListener('change', () => {
+                // Recreate luminaires with new shape if predictions exist
+                if (lastPredictions) {
+                    createLuminaires();
+                }
+            });
+
+            // Function dropdown
+            const funcSel = document.getElementById('function');
+            const EoInput = document.getElementById('Eo');
+            const UoInput = document.getElementById('Uo');
+            funcSel.addEventListener('change', () => {
+                const preset = functionPresets[funcSel.value];
+                if (preset) {
+                    EoInput.value = preset.Eo;
+                    UoInput.value = preset.Uo;
+                }
+            });
+
+            // Zoom control
+            const zoomSlider = document.getElementById('zoom');
+            const zoomVal = document.getElementById('zoom_val');
+            zoomSlider.addEventListener('input', () => {
+                zoomVal.textContent = zoomSlider.value;
+                updateCameraPosition();
+            });
+
+            // Exposure control
+            const exposureSlider = document.getElementById('exposure');
+            const exposureVal = document.getElementById('exposure_val');
+            exposureSlider.addEventListener('input', () => {
+                exposureValue = parseFloat(exposureSlider.value);
+                exposureVal.textContent = exposureValue.toFixed(2);
+                // Update lighting with new exposure
+                updateLightingIntensity();
+                // Recreate luminaires with new exposure if predictions exist
+                if (lastPredictions) {
+                    createLuminaires();
+                }
+            });
+            // Initialize display
+            exposureVal.textContent = exposureValue.toFixed(2);
+
+            // Light color control (2800-6500K)
+            const lightColorSlider = document.getElementById('lightColorK');
+            const lightColorVal = document.getElementById('lightColorK_val');
+            lightColorSlider.addEventListener('input', () => {
+                lightColorVal.textContent = lightColorSlider.value;
+                // Update lighting colors
+                setupLighting();
+                // Update luminaire colors and shapes
+                if (lastPredictions) {
+                    createLuminaires();
+                }
+            });
+
+            // Toggle controls
+            const showWallsCheckbox = document.getElementById('showWalls');
+            showWallsCheckbox.addEventListener('change', (e) => {
+                if (walls.back) walls.back.visible = e.target.checked;
+                if (walls.left) walls.left.visible = e.target.checked;
+            });
+            // Set initial wall visibility based on checkbox (unchecked by default)
+            if (walls.back) walls.back.visible = showWallsCheckbox.checked;
+            if (walls.left) walls.left.visible = showWallsCheckbox.checked;
+
+            document.getElementById('showFloor').addEventListener('change', (e) => {
+                if (floor) floor.visible = e.target.checked;
+            });
+
+            document.getElementById('showLuminaires').addEventListener('change', (e) => {
+                luminaires.forEach(lum => lum.visible = e.target.checked);
+                lights.forEach(light => light.visible = e.target.checked);
+            });
+            
+            // Lumen multiplier control removed - using default intensity of 1
+
+            // Form submission
+            document.getElementById('predictionForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                document.querySelector('.loading').style.display = 'block';
+                document.querySelector('.error-message').style.display = 'none';
+                
+                try {
+                    const X = parseFloat(document.getElementById('X').value);
+                    const Y = parseFloat(document.getElementById('Y').value);
+                    const Z = parseFloat(document.getElementById('Z').value);
+                    const R = parseFloat(document.getElementById('R').value) / 100;
+                    const Eo = parseFloat(document.getElementById('Eo').value);
+                    const Uo = parseFloat(document.getElementById('Uo').value);
+                    const luminaireType = document.getElementById('luminaireType').value;
+                    
+                    const predictions = predict([X, Y, Z, R, Eo, Uo]);
+                    const matches = findBestMatches(predictions.Degree, predictions.Lumen, luminaireType);
+                    
+                    updatePredictionDisplay(predictions, matches);
+                    
+                } catch (error) {
+                    document.querySelector('.error-message').textContent = error.message;
+                    document.querySelector('.error-message').style.display = 'block';
+                } finally {
+                    document.querySelector('.loading').style.display = 'none';
+                }
+            });
+
+            // Window resize
+            window.addEventListener('resize', () => {
+                if (camera && renderer) {
+                    const width = document.getElementById('room3d').clientWidth;
+                    const height = document.getElementById('room3d').clientHeight;
+                    camera.aspect = width / height;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(width, height);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+
