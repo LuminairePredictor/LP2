@@ -1,4 +1,6 @@
-Other details can be found at paper titled: "Application of a Machine Learning-Based Prediction Model for the Design of General Lighting Systems in Offices" Full Citation:
+Other details can be found at paper titled: "Application of a Machine Learning-Based Prediction Model for the Design of General Lighting Systems in Offices" 
+
+Full Citation:
 
 Yaşa, M.D., & Yagmur, S.A. (2025). "Application of a Machine Learning-Based Prediction Model for the Design of General Lighting Systems in Offices". Results in Engineering, 108774.
 
